@@ -85,3 +85,77 @@ ConcurrentMap<K, V> asMap();
 ```
 
 重写了父接口的方法，需要注意的是尽管视图是可以更改的，但是返回的map上的任何方法都不会导致自动加载键值对
+
+### 抽象类AbstractLoadingCache
+
+#### 介绍
+
+此抽象类提供了Cache接口的基本实现。它的子类只需要继承它并实现`get(Object)`和`getIfPresent()`方法即可。
+
+`getUnchecked()`、`get(Object, Callable)`和`getAll()`都是根据get()方法实现的；`getAllPresent()`是根据getIfPresent()实现的；`putAll()`是根据put()实现的；`invalidateAll(Iterator)`是根据invalidate()实现的；`cleanUp()`依旧没有做任何操作；其他的方法都会直接抛出`UnsupportedOperationException`异常
+
+#### 关于抽象类
+
+```java
+@Beta
+public abstract class AbstractLoadingCache<K, V>
+    extends AbstractCache<K, V> implements LoadingCache<K, V> {
+```
+
+此抽象类继承了`AbstractCache`抽象类，实现了`LoadingCache`接口
+
+#### 方法
+
+##### getUnchecked()
+
+```java
+@Override
+public V getUnchecked(K key) {
+  try {
+    return get(key);
+  } catch (ExecutionException e) {
+    throw new UncheckedExecutionException(e.getCause());
+  }
+}
+```
+
+内部直接调用`LoadingCache#get()`方法来实现并使用try-catch包裹，如果发生异常则统一抛出UncheckedExecutionException异常
+
+##### getAll()
+
+```java
+@Override
+public ImmutableMap<K, V> getAll(Iterable<? extends K> keys) throws ExecutionException {
+  Map<K, V> result = Maps.newLinkedHashMap();
+  for (K key : keys) {
+    if (!result.containsKey(key)) {
+      result.put(key, get(key));
+    }
+  }
+  return ImmutableMap.copyOf(result);
+}
+```
+
+简单的遍历传入的迭代器，然后根据keys调用`LoadingCache#get()`获取到键，最终存储到一个ImmutableMap中
+
+##### apply()
+
+```java
+@Override
+public final V apply(K key) {
+  return getUnchecked(key);
+}
+```
+
+实际上内部调用了本类的`getUnchecked()`方法
+
+##### refresh()
+
+```java
+@Override
+public void refresh(K key) {
+  throw new UnsupportedOperationException();
+}
+```
+
+被抽象类不支持此方法，直接抛出`UnsupportedOperationException`异常
