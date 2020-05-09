@@ -159,3 +159,7 @@ public void refresh(K key) {
 ```
 
 被抽象类不支持此方法，直接抛出`UnsupportedOperationException`异常
+
+### 总结
+
+LoadingCache接口继承了Cache接口在其基础上，扩展了通过缓存加载器来加载映射的值。而AbstractLoadingCache的设计是在接口的实现基础上提供了成本更低的抽象类。
