@@ -344,3 +344,355 @@ int getConcurrencyLevel() {
 }
 ```
 
+##### 关于最大值MaximumSize
+
+指定一个缓存能够存储的键值对的最大数量。需要注意：当键值对的数量超过此设置的值，那么将会丢弃一个键值对。当键值对的数量接近最大值时，缓存会将使用的最少的(最近没有被访问到的)键值对丢弃。
+
+> 当设置大小为零时，被加载到缓存的键值对会立即被缓存丢弃。这对于测试或者不修改代码来禁用缓存的程序来说是很有帮助的
+
+**注意：**它不能与maximumWeight一起使用
+
+```java
+public CacheBuilder<K, V> maximumSize(long size) {
+  checkState(this.maximumSize == UNSET_INT, "maximum size was already set to %s",
+      this.maximumSize);
+  checkState(this.maximumWeight == UNSET_INT, "maximum weight was already set to %s",
+      this.maximumWeight);
+  checkState(this.weigher == null, "maximum size can not be combined with weigher");
+  checkArgument(size >= 0, "maximum size must not be negative");
+  this.maximumSize = size;
+  return this;
+}
+```
+
+##### 关于最大权重MaximumWeight
+
+指定一个缓存的键值对的最大权重。权重是使用Weigher来决定的，使用这种方法需要在调用`build()`之前调用相应的Weigher。
+
+在超过权重之后，缓存可能会丢弃一个键值对。当权重接近最大权重时，缓存可能会丢弃一个最近不被使用的键值对。
+
+> 当设置大小为零时，被加载到缓存中的键值对会立即被缓存丢弃。这对于测试或者不修改代码来禁用缓存的程序是很有帮助的
+
+**注意：**权重仅仅决定了键值对是否超过了缓存的最大容量，它对于下一步会丢弃哪个键值对没有任何影响。它同样不能与MaximumSize一起使用
+
+```java
+@GwtIncompatible("To be supported")
+public CacheBuilder<K, V> maximumWeight(long weight) {
+  checkState(this.maximumWeight == UNSET_INT, "maximum weight was already set to %s",
+      this.maximumWeight);
+  checkState(this.maximumSize == UNSET_INT, "maximum size was already set to %s",
+      this.maximumSize);
+  this.maximumWeight = weight;
+  checkArgument(weight >= 0, "maximum weight must not be negative");
+  return this;
+}
+
+long getMaximumWeight() {
+  if (expireAfterWriteNanos == 0 || expireAfterAccessNanos == 0) {
+    return 0;
+  }
+  return (weigher == null) ? maximumSize : maximumWeight;
+}
+```
+
+##### 关于Weigher
+
+用于确定缓存中键值对的权重。当确定要丢弃哪些键值对时，`maximumWeight(long)`这个方法会考虑键值对的权重，并且如果想使用这个方法(maximumWeight(long))需要在调用`build()`之前调用它。当一个键值对被添加到缓存中的时候键值对的权重就被测量和记录下来了，所以在整个键值对的生命周期中，权重相当于一个静态的属性。
+
+当权重为零时，将不会考虑根据数量丢弃键值对。
+
+**注意：**它返回的是带泛型的CacheBuilder，这意味着它是安全的、有类型限制的，以防以后抛出`ClassCastException`
+
+```java
+@GwtIncompatible("To be supported")
+public <K1 extends K, V1 extends V> CacheBuilder<K1, V1> weigher(
+    Weigher<? super K1, ? super V1> weigher) {
+  checkState(this.weigher == null);
+  if (strictParsing) {
+    checkState(this.maximumSize == UNSET_INT, "weigher can not be combined with maximum size",
+        this.maximumSize);
+  }
+
+  // safely limiting the kinds of caches this can produce
+  @SuppressWarnings("unchecked")
+  CacheBuilder<K1, V1> me = (CacheBuilder<K1, V1>) this;
+  me.weigher = checkNotNull(weigher);
+  return me;
+}
+
+@SuppressWarnings("unchecked")
+<K1 extends K, V1 extends V> Weigher<K1, V1> getWeigher() {
+  return (Weigher<K1, V1>) MoreObjects.firstNonNull(weigher, OneWeigher.INSTANCE);
+}
+```
+
+##### 关于键值的引用强度
+
+```java
+//键
+@GwtIncompatible("java.lang.ref.WeakReference")
+public CacheBuilder<K, V> weakKeys() {
+  return setKeyStrength(Strength.WEAK);
+}
+
+CacheBuilder<K, V> setKeyStrength(Strength strength) {
+  checkState(keyStrength == null, "Key strength was already set to %s", keyStrength);
+  keyStrength = checkNotNull(strength);
+  return this;
+}
+
+Strength getKeyStrength() {
+  return MoreObjects.firstNonNull(keyStrength, Strength.STRONG);
+}
+//值
+@GwtIncompatible("java.lang.ref.WeakReference")
+public CacheBuilder<K, V> weakValues() {
+  return setValueStrength(Strength.WEAK);
+}
+@GwtIncompatible("java.lang.ref.SoftReference")
+public CacheBuilder<K, V> softValues() {
+  return setValueStrength(Strength.SOFT);
+}
+
+CacheBuilder<K, V> setValueStrength(Strength strength) {
+  checkState(valueStrength == null, "Value strength was already set to %s", valueStrength);
+  valueStrength = checkNotNull(strength);
+  return this;
+}
+
+Strength getValueStrength() {
+  return MoreObjects.firstNonNull(valueStrength, Strength.STRONG);
+}
+```
+
+##### 关于两种过期方式
+
+```java
+//写后过期
+public CacheBuilder<K, V> expireAfterWrite(long duration, TimeUnit unit) {
+  checkState(expireAfterWriteNanos == UNSET_INT, "expireAfterWrite was already set to %s ns", expireAfterWriteNanos);
+  checkArgument(duration >= 0, "duration cannot be negative: %s %s", duration, unit);
+  this.expireAfterWriteNanos = unit.toNanos(duration);
+  return this;
+}
+
+long getExpireAfterWriteNanos() {
+  return (expireAfterWriteNanos == UNSET_INT) ? DEFAULT_EXPIRATION_NANOS : expireAfterWriteNanos;
+}
+//最近访问后过期
+public CacheBuilder<K, V> expireAfterAccess(long duration, TimeUnit unit) {
+  checkState(expireAfterAccessNanos == UNSET_INT, "expireAfterAccess was already set to %s ns", expireAfterAccessNanos);
+  checkArgument(duration >= 0, "duration cannot be negative: %s %s", duration, unit);
+  this.expireAfterAccessNanos = unit.toNanos(duration);
+  return this;
+}
+
+long getExpireAfterAccessNanos() {
+  return (expireAfterAccessNanos == UNSET_INT)
+      ? DEFAULT_EXPIRATION_NANOS : expireAfterAccessNanos;
+}
+```
+
+##### 关于刷新时间
+
+在键值对创建之后或者对其值的最新替换之后的一段时间之后自动刷新。刷新的语义由`LoadingCache#refresh()`指定，并且通过调用`CacheLoader#load()`方法执行刷新。
+
+当请求一个已经过期的键值对那么就会触发刷新。当此请求触发了刷新时将会阻塞对`CacheLoader#load()`方法的调用，如果要返回的值已经被加载出来那么会立即返回新值，否则将返回旧值。
+
+需要注意的是，在刷新期间所有的异常都会被记录到日志中，但是这些异常会被"catch"住而不会停止程序
+
+```java
+@Beta
+@GwtIncompatible("To be supported (synchronously).")
+public CacheBuilder<K, V> refreshAfterWrite(long duration, TimeUnit unit) {
+  checkNotNull(unit);
+  checkState(refreshNanos == UNSET_INT, "refresh was already set to %s ns", refreshNanos);
+  checkArgument(duration > 0, "duration must be positive: %s %s", duration, unit);
+  this.refreshNanos = unit.toNanos(duration);
+  return this;
+}
+
+long getRefreshNanos() {
+  return (refreshNanos == UNSET_INT) ? DEFAULT_REFRESH_NANOS : refreshNanos;
+}
+```
+
+##### 关于纳秒精度时间源
+
+指定纳秒精度的时间源，它用于确定键值对应该在何时过期。默认情况下使用系统的纳秒时间。制定此变量的目的是方便测试设置了过期的缓存。
+
+```java
+public CacheBuilder<K, V> ticker(Ticker ticker) {
+  checkState(this.ticker == null);
+  this.ticker = checkNotNull(ticker);
+  return this;
+}
+
+Ticker getTicker(boolean recordsTime) {
+  if (ticker != null) {
+    return ticker;
+  }
+  return recordsTime ? Ticker.systemTicker() : NULL_TICKER;
+}
+```
+
+##### 关于移除监听器
+
+指定了一个监听器用来监听丢弃键值对的操作。
+
+```java
+@CheckReturnValue
+public <K1 extends K, V1 extends V> CacheBuilder<K1, V1> removalListener(
+    RemovalListener<? super K1, ? super V1> listener) {
+  checkState(this.removalListener == null);
+
+  // safely limiting the kinds of caches this can produce
+  @SuppressWarnings("unchecked")
+  CacheBuilder<K1, V1> me = (CacheBuilder<K1, V1>) this;
+  me.removalListener = checkNotNull(listener);
+  return me;
+}
+
+// Make a safe contravariant cast now so we don't have to do it over and over.
+@SuppressWarnings("unchecked")
+<K1 extends K, V1 extends V> RemovalListener<K1, V1> getRemovalListener() {
+  return (RemovalListener<K1, V1>)
+      MoreObjects.firstNonNull(removalListener, NullListener.INSTANCE);
+}
+```
+
+##### 关于统计记录
+
+用来记录对缓存的各种操作，对缓存的性能可能会有一定影响
+
+```java
+public CacheBuilder<K, V> recordStats() {
+  statsCounterSupplier = CACHE_STATS_COUNTER;
+  return this;
+}
+
+boolean isRecordingStats() {
+  return statsCounterSupplier == CACHE_STATS_COUNTER;
+}
+
+Supplier<? extends StatsCounter> getStatsCounterSupplier() {
+  return statsCounterSupplier;
+}
+```
+
+##### 关于构建缓存
+
+用来构建缓存，既可以指定一个key根据key来获取已有的值也可以根据提供的CacheLoader来检索或计算值。如果另一个线程正在加载该key的值，那么只需等待该线程计算完毕后直接返回新计算的值即可。
+
+> 多个线程可以同时加载不同键的值
+
+此方法不会改变CacheBuilder实例的状态，因此可以再次调用它来创建独立的缓存
+
+```java
+public <K1 extends K, V1 extends V> LoadingCache<K1, V1> build(
+    CacheLoader<? super K1, V1> loader) {
+  checkWeightWithWeigher();
+  return new LocalCache.LocalLoadingCache<K1, V1>(this, loader);
+}
+```
+
+构建一个不会再key被请求时加载值的缓存
+
+```java
+public <K1 extends K, V1 extends V> Cache<K1, V1> build() {
+  checkWeightWithWeigher();
+  checkNonLoadingCache();
+  return new LocalCache.LocalManualCache<K1, V1>(this);
+}
+
+private void checkNonLoadingCache() {
+  checkState(refreshNanos == UNSET_INT, "refreshAfterWrite requires a LoadingCache");
+}
+
+private void checkWeightWithWeigher() {
+  if (weigher == null) {
+    checkState(maximumWeight == UNSET_INT, "maximumWeight requires weigher");
+  } else {
+    if (strictParsing) {
+      checkState(maximumWeight != UNSET_INT, "weigher requires maximumWeight");
+    } else {
+      if (maximumWeight == UNSET_INT) {
+        logger.log(Level.WARNING, "ignoring weigher specified without maximumWeight");
+      }
+    }
+  }
+}
+```
+
+##### 关于输出
+
+输出此CacheBuilder实例的信息
+
+```java
+@Override
+public String toString() {
+  MoreObjects.ToStringHelper s = MoreObjects.toStringHelper(this);
+  if (initialCapacity != UNSET_INT) {
+    s.add("initialCapacity", initialCapacity);
+  }
+  if (concurrencyLevel != UNSET_INT) {
+    s.add("concurrencyLevel", concurrencyLevel);
+  }
+  if (maximumSize != UNSET_INT) {
+    s.add("maximumSize", maximumSize);
+  }
+  if (maximumWeight != UNSET_INT) {
+    s.add("maximumWeight", maximumWeight);
+  }
+  if (expireAfterWriteNanos != UNSET_INT) {
+    s.add("expireAfterWrite", expireAfterWriteNanos + "ns");
+  }
+  if (expireAfterAccessNanos != UNSET_INT) {
+    s.add("expireAfterAccess", expireAfterAccessNanos + "ns");
+  }
+  if (keyStrength != null) {
+    s.add("keyStrength", Ascii.toLowerCase(keyStrength.toString()));
+  }
+  if (valueStrength != null) {
+    s.add("valueStrength", Ascii.toLowerCase(valueStrength.toString()));
+  }
+  if (keyEquivalence != null) {
+    s.addValue("keyEquivalence");
+  }
+  if (valueEquivalence != null) {
+    s.addValue("valueEquivalence");
+  }
+  if (removalListener != null) {
+    s.addValue("removalListener");
+  }
+  return s.toString();
+}
+```
+
+#### 内部枚举类
+
+实现了RemovalListener和Weigher的两个枚举类，各提供了一个实例并重写了一个方法
+
+```java
+enum NullListener implements RemovalListener<Object, Object> {
+  INSTANCE;
+
+  @Override
+  public void onRemoval(RemovalNotification<Object, Object> notification) {}
+}
+
+enum OneWeigher implements Weigher<Object, Object> {
+  INSTANCE;
+
+  @Override
+  public int weigh(Object key, Object value) {
+    return 1;
+  }
+}
+```
+
+
+
+### 总结
+
+此类整体看下来其实并不复杂，但是这个代码量很劝退！看下来之后才发现这些方法都是针对那一大堆成员变量写的类似”get/set“方法。所以只要理解了那些成员变量的含义即可。看完之后可以对Guava Cache的整体思路有一定理解。
